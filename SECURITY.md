@@ -31,6 +31,7 @@ No protege:
 - Validacion completa de checksum y version de direcciones Onion v3.
 - Comparacion constante del hash del secreto.
 - Limites de tamano, tiempo, concurrencia y tasa.
+- Cuota local por cantidad y bytes totales, con publicacion atomica de cada nodo.
 - API local limitada por host, origen, `Sec-Fetch-Site` y cabecera privada.
 - CSP estricta, bloqueo de marcos, `nosniff`, `no-store` y sin recursos remotos.
 - Credenciales SOCKS aleatorias por consulta para aislar circuitos.
@@ -44,8 +45,8 @@ No protege:
 - Haz una copia segura de `data/onion-service` solo si necesitas conservar la direccion. Quien tenga esas llaves puede suplantar el buzon.
 - Reinicia el servicio si Tor queda detenido y confirma en la interfaz que el estado sea `Buzon Onion publicado`.
 - Revoca las cartas que ya no deban estar disponibles.
+- Ajusta `TROSTE_MAX_ACTIVE_NODES`, `TROSTE_MAX_TOTAL_NODE_MIB` y `TROSTE_MAX_CONCURRENT_RESOLVES` solo si conoces el costo operativo.
 
 ## Reporte responsable
 
 No incluyas cartas, codigos completos, frases de seguridad ni llaves privadas en un reporte. Describe el comportamiento, la version, los pasos minimos para reproducirlo y el impacto esperado.
-

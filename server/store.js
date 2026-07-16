@@ -1,13 +1,17 @@
-import { constants as fsConstants } from "node:fs";
-import { access, mkdir, open, readFile, readdir, rename, unlink } from "node:fs/promises";
+import { link, mkdir, open, readFile, readdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { isRoutePayload, safeHexEqual, SHA256_PATTERN, UUID_PATTERN } from "./security.js";
 
 export class LetterStore {
-  constructor({ directory, maxPayloadBytes, maxTtlMs }) {
+  constructor({ directory, maxPayloadBytes, maxTtlMs, maxActiveNodes = 500, maxTotalBytes = 64 * 1024 * 1024 }) {
     this.directory = directory;
     this.maxPayloadBytes = maxPayloadBytes;
     this.maxTtlMs = maxTtlMs;
+    this.maxActiveNodes = maxActiveNodes;
+    this.maxTotalBytes = maxTotalBytes;
+    this.activeNodes = 0;
+    this.totalBytes = 0;
+    this.mutationQueue = Promise.resolve();
   }
 
   async init() {
@@ -42,24 +46,36 @@ export class LetterStore {
       expiresAt: new Date(record.expiresAt).toISOString(),
       payload: record.payload
     };
-    const target = this.filePath(normalized.nodeId);
-    const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-    const handle = await open(temporary, "wx", 0o600);
-    try {
-      await handle.writeFile(JSON.stringify(normalized), "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    try {
-      await access(target, fsConstants.F_OK);
+    const serialized = JSON.stringify(normalized);
+    const storedBytes = Buffer.byteLength(serialized, "utf8");
+
+    return this.mutate(async () => {
+      if (this.activeNodes >= this.maxActiveNodes || this.totalBytes + storedBytes > this.maxTotalBytes) {
+        throw storeError("STORE_FULL", "La caja alcanzo su capacidad local. Revoca cartas antes de guardar otra.");
+      }
+
+      const target = this.filePath(normalized.nodeId);
+      const temporary = `${target}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+      const handle = await open(temporary, "wx", 0o600);
+      try {
+        await handle.writeFile(serialized, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+
+      try {
+        await link(temporary, target);
+      } catch (error) {
+        await unlink(temporary).catch(() => {});
+        if (error.code === "EEXIST") throw storeError("NODE_EXISTS", "Ese identificador ya existe.");
+        throw error;
+      }
       await unlink(temporary).catch(() => {});
-      throw storeError("NODE_EXISTS", "Ese identificador ya existe.");
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-    await rename(temporary, target);
-    return normalized;
+      this.activeNodes += 1;
+      this.totalBytes += storedBytes;
+      return normalized;
+    });
   }
 
   async read(nodeId) {
@@ -85,40 +101,75 @@ export class LetterStore {
   }
 
   async remove(nodeId) {
-    try {
-      await unlink(this.filePath(nodeId));
-      return true;
-    } catch (error) {
-      if (error.code === "ENOENT") return false;
-      throw error;
-    }
+    return this.mutate(async () => {
+      const target = this.filePath(nodeId);
+      try {
+        const details = await stat(target);
+        await unlink(target);
+        this.activeNodes = Math.max(0, this.activeNodes - 1);
+        this.totalBytes = Math.max(0, this.totalBytes - details.size);
+        return true;
+      } catch (error) {
+        if (error.code === "ENOENT") return false;
+        throw error;
+      }
+    });
   }
 
   async count() {
-    const names = await readdir(this.directory);
-    return names.filter((name) => /^[0-9a-f-]{36}\.json$/.test(name)).length;
+    return this.activeNodes;
+  }
+
+  usage() {
+    return {
+      activeNodes: this.activeNodes,
+      maxActiveNodes: this.maxActiveNodes,
+      totalBytes: this.totalBytes,
+      maxTotalBytes: this.maxTotalBytes
+    };
   }
 
   async cleanupExpired() {
-    const names = await readdir(this.directory).catch(() => []);
-    let removed = 0;
-    for (const name of names) {
-      if (!/^[0-9a-f-]{36}\.json$/.test(name)) continue;
-      const target = path.join(this.directory, name);
-      try {
-        const record = JSON.parse(await readFile(target, "utf8"));
-        const isExpired = !Number.isFinite(Date.parse(record?.expiresAt)) || Date.parse(record.expiresAt) <= Date.now();
-        const isCorrupt = record?.nodeId !== name.slice(0, -5) || !isRoutePayload(record?.payload, this.maxPayloadBytes);
-        if (isExpired || isCorrupt) {
-          await unlink(target);
+    return this.mutate(async () => {
+      const names = await readdir(this.directory).catch(() => []);
+      let removed = 0;
+      let processed = 0;
+      for (const name of names) {
+        if (!/^[0-9a-f-]{36}\.json$/.test(name)) continue;
+        const target = path.join(this.directory, name);
+        try {
+          const record = JSON.parse(await readFile(target, "utf8"));
+          const isExpired = !Number.isFinite(Date.parse(record?.expiresAt)) || Date.parse(record.expiresAt) <= Date.now();
+          const isCorrupt = record?.nodeId !== name.slice(0, -5) || !isRoutePayload(record?.payload, this.maxPayloadBytes);
+          if (isExpired || isCorrupt) {
+            await unlink(target);
+            removed += 1;
+          }
+        } catch {
+          await unlink(target).catch(() => {});
           removed += 1;
         }
-      } catch {
-        await unlink(target).catch(() => {});
-        removed += 1;
+        processed += 1;
+        if (processed % 50 === 0) await new Promise((resolve) => setImmediate(resolve));
       }
-    }
-    return removed;
+      await this.refreshUsage();
+      return removed;
+    });
+  }
+
+  mutate(operation) {
+    const pending = this.mutationQueue.then(operation, operation);
+    this.mutationQueue = pending.catch(() => {});
+    return pending;
+  }
+
+  async refreshUsage() {
+    const names = await readdir(this.directory).catch(() => []);
+    const sizes = await Promise.all(names
+      .filter((name) => /^[0-9a-f-]{36}\.json$/.test(name))
+      .map((name) => stat(path.join(this.directory, name)).then((details) => details.size).catch(() => 0)));
+    this.activeNodes = sizes.filter((size) => size > 0).length;
+    this.totalBytes = sizes.reduce((total, size) => total + size, 0);
   }
 }
 

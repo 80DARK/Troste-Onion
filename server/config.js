@@ -11,6 +11,14 @@ function readPort(name, fallback) {
   return value;
 }
 
+function readBoundedInteger(name, fallback, minimum, maximum) {
+  const value = Number.parseInt(process.env[name] || String(fallback), 10);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} debe estar entre ${minimum} y ${maximum}.`);
+  }
+  return value;
+}
+
 export const config = Object.freeze({
   projectDir,
   uiHost: "127.0.0.1",
@@ -26,6 +34,9 @@ export const config = Object.freeze({
   maxStoredPayloadBytes: 96 * 1024,
   maxRemoteBodyBytes: 2048,
   maxLocalBodyBytes: 128 * 1024,
+  maxActiveNodes: readBoundedInteger("TROSTE_MAX_ACTIVE_NODES", 500, 1, 10_000),
+  maxTotalNodeBytes: readBoundedInteger("TROSTE_MAX_TOTAL_NODE_MIB", 64, 1, 1024) * 1024 * 1024,
+  maxConcurrentResolves: readBoundedInteger("TROSTE_MAX_CONCURRENT_RESOLVES", 4, 1, 16),
   resolveTimeoutMs: 45_000,
   nodeTtlMs: 90 * 24 * 60 * 60 * 1000
 });

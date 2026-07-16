@@ -24,6 +24,7 @@ test("panel local y puerto Onion mantienen permisos separados", async (t) => {
       TROSTE_ONION_PORT: String(onionPort),
       TOR_SOCKS_PORT: String(socksPort),
       TROSTE_DATA_DIR: dataDir,
+      TROSTE_MAX_ACTIVE_NODES: "1",
       TROSTE_MANAGE_TOR: "false",
       TROSTE_ONION_ADDRESS: onionAddress
     },
@@ -45,9 +46,12 @@ test("panel local y puerto Onion mantienen permisos separados", async (t) => {
   };
   const statusResponse = await fetch(`${local}/api/status`, { headers: { "X-Troste-Local": "1", Origin: local } });
   assert.equal(statusResponse.status, 200);
+  assert.match(statusResponse.headers.get("permissions-policy"), /camera=\(\)/);
   assert.equal((await statusResponse.json()).onionAddress, onionAddress);
 
   assert.equal((await fetch(`${local}/api/status`)).status, 403);
+  assert.equal((await fetch(`${local}/package.json`)).status, 404);
+  assert.equal((await fetch(`${local}/..%2Fpackage.json`)).status, 404);
   assert.equal((await fetch(`${remote}/api/status`)).status, 404);
   assert.equal((await fetch(`${remote}/api/nodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 404);
 
@@ -71,6 +75,20 @@ test("panel local y puerto Onion mantienen permisos separados", async (t) => {
     })
   });
   assert.equal(published.status, 201);
+
+  const fullNodeId = randomUUID();
+  const storeFull = await fetch(`${local}/api/nodes`, {
+    method: "POST",
+    headers: localHeaders,
+    body: JSON.stringify({
+      nodeId: fullNodeId,
+      secretHash: hashRouteSecret(fullNodeId, randomBytes(32).toString("base64url")),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      payload
+    })
+  });
+  assert.equal(storeFull.status, 507);
+  assert.equal((await storeFull.json()).code, "STORE_FULL");
 
   const resolved = await fetch(`${remote}/v1/letters/${nodeId}`, {
     method: "POST",

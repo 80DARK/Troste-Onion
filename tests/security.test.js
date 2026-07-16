@@ -11,6 +11,8 @@ test("la superficie publicada mantiene el protocolo Onion minimo", () => {
   const app = read("app.js");
   const html = read("index.html");
   const main = read("server/main.js");
+  const security = read("server/security.js");
+  const store = read("server/store.js");
   const tor = read("server/tor-manager.js");
   const gitignore = read(".gitignore");
 
@@ -28,7 +30,14 @@ test("la superficie publicada mantiene el protocolo Onion minimo", () => {
   assert(main.includes('url.pathname.match(/^\\/v1\\/letters\\/'));
   assert(!main.includes('GET" && url.pathname === "/v1/'));
   assert(main.includes('req.headers["x-troste-local"] !== "1"'));
+  assert(main.includes("localResolveInFlight >= config.maxConcurrentResolves"));
+  assert(main.includes("localPublishLimiter.consume()"));
+  assert(main.includes("safeErrorSummary(error)"));
+  assert(!main.includes('console.error(`[${code}] ${error.message}`)'));
   assert(main.includes('"Cross-Origin-Opener-Policy": "same-origin"'));
+  assert(security.includes('"Permissions-Policy"'));
+  assert(store.includes("await link(temporary, target)"));
+  assert(!store.includes("await rename(temporary, target)"));
   assert(tor.includes("HiddenServiceVersion 3"));
   assert(tor.includes("IsolateSOCKSAuth"));
   assert(tor.includes("SafeLogging 1"));

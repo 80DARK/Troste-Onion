@@ -71,6 +71,7 @@ export function privateHeaders(extra = {}) {
     "Cache-Control": "no-store, max-age=0",
     Pragma: "no-cache",
     "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=()",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Cross-Origin-Resource-Policy": "same-origin",

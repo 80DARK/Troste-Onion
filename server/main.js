@@ -22,7 +22,9 @@ const { BASE64URL_SECRET_PATTERN, hashRouteSecret, isRoutePayload, privateHeader
 const store = new LetterStore({
   directory: path.join(config.dataDir, "nodes"),
   maxPayloadBytes: config.maxStoredPayloadBytes,
-  maxTtlMs: config.nodeTtlMs
+  maxTtlMs: config.nodeTtlMs,
+  maxActiveNodes: config.maxActiveNodes,
+  maxTotalBytes: config.maxTotalNodeBytes
 });
 const tor = new TorManager(config);
 const onionClient = new OnionClient({
@@ -32,8 +34,10 @@ const onionClient = new OnionClient({
   maxResponseBytes: config.maxStoredPayloadBytes + 4096
 });
 const remoteLimiter = new SlidingWindowLimiter({ max: 120, windowMs: 60_000 });
+const localPublishLimiter = new SlidingWindowLimiter({ max: 20, windowMs: 60_000 });
 const localResolveLimiter = new SlidingWindowLimiter({ max: 30, windowMs: 60_000 });
 let remoteInFlight = 0;
+let localResolveInFlight = 0;
 
 await store.init();
 
@@ -99,6 +103,7 @@ async function handleLocalRequest(req, res) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/nodes") {
+    if (!localPublishLimiter.consume()) throw httpError(429, "RATE_LIMITED", "Demasiadas cartas selladas en poco tiempo.");
     const body = await readJson(req, config.maxLocalBodyBytes);
     if (!UUID_PATTERN.test(body.nodeId || "") || !/^[a-f0-9]{64}$/.test(body.secretHash || "")) {
       throw httpError(400, "INVALID_NODE", "Identificador o hash de ruta invalido.");
@@ -129,19 +134,26 @@ async function handleLocalRequest(req, res) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/resolve") {
-    if (!localResolveLimiter.consume()) throw httpError(429, "RATE_LIMITED", "Demasiadas consultas locales.");
+    if (!localResolveLimiter.consume() || localResolveInFlight >= config.maxConcurrentResolves) {
+      throw httpError(429, "RATE_LIMITED", "Demasiadas consultas locales.");
+    }
     const torStatus = tor.getStatus();
     if (torStatus.state !== "ready") throw httpError(503, "TOR_NOT_READY", torStatus.message);
-    const body = await readJson(req, 2048);
-    const payload = await onionClient.resolve({
-      onionAddress: String(body.onionAddress || "").toLowerCase(),
-      nodeId: String(body.nodeId || "").toLowerCase(),
-      secret: body.secret
-    });
-    if (!isRoutePayload(payload.payload, config.maxStoredPayloadBytes)) {
-      throw httpError(502, "INVALID_RESPONSE", "El buzon Onion devolvio un paquete invalido.");
+    localResolveInFlight += 1;
+    try {
+      const body = await readJson(req, 2048);
+      const payload = await onionClient.resolve({
+        onionAddress: String(body.onionAddress || "").toLowerCase(),
+        nodeId: String(body.nodeId || "").toLowerCase(),
+        secret: body.secret
+      });
+      if (!isRoutePayload(payload.payload, config.maxStoredPayloadBytes)) {
+        throw httpError(502, "INVALID_RESPONSE", "El buzon Onion devolvio un paquete invalido.");
+      }
+      sendJson(res, 200, { payload: payload.payload });
+    } finally {
+      localResolveInFlight -= 1;
     }
-    sendJson(res, 200, { payload: payload.payload });
     return;
   }
 
@@ -221,16 +233,27 @@ function handleError(res, error, local) {
   }
   const status = Number.isInteger(error.status) ? error.status : mapErrorStatus(error.code);
   const code = error.code || "INTERNAL_ERROR";
-  const message = status >= 500 && !local ? "Buzon no disponible." : error.message || "Error interno.";
-  if (status >= 500) console.error(`[${code}] ${error.message}`);
+  const publicServerCodes = new Set(["STORE_FULL", "TOR_NOT_READY", "ONION_UNREACHABLE", "INVALID_RESPONSE"]);
+  const exposeMessage = status < 500 || (local && publicServerCodes.has(code));
+  const message = exposeMessage
+    ? error.message || "Solicitud rechazada."
+    : (local ? "El nodo local encontro un error interno." : "Buzon no disponible.");
+  if (status >= 500) console.error(`[${code}] ${safeErrorSummary(error)}`);
   sendJson(res, status, { error: message, code });
 }
 
 function mapErrorStatus(code) {
   if (code === "NODE_EXISTS") return 409;
+  if (code === "STORE_FULL") return 507;
   if (code === "ONION_UNREACHABLE" || code === "INVALID_RESPONSE") return 502;
-  if (code === "INVALID_CODE") return 400;
+  if (["INVALID_CODE", "INVALID_NODE", "INVALID_SECRET_HASH", "INVALID_EXPIRATION", "INVALID_PAYLOAD"].includes(code)) return 400;
   return 500;
+}
+
+function safeErrorSummary(error) {
+  const name = typeof error?.name === "string" ? error.name : "Error";
+  const syscall = typeof error?.syscall === "string" ? ` ${error.syscall}` : "";
+  return `${name}${syscall}`;
 }
 
 function listen(server, port, host) {
