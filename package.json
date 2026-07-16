@@ -1,0 +1,19 @@
+{
+  "name": "troste-onion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cartas cifradas entregadas directamente entre Onion Services, sin directorio central.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node server/main.js",
+    "dev": "node server/main.js",
+    "tor:install": "node scripts/install-tor.js",
+    "test": "node --check app.js && node --check server/main.js && node --test tests/crypto.test.js tests/integration.test.js tests/store.test.js tests/security.test.js"
+  },
+  "dependencies": {
+    "socks-proxy-agent": "10.1.0"
+  }
+}

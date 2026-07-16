@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Troste Onion - cartas sin directorio</title>
+    <link rel="icon" href="data:," />
+    <meta
+      name="description"
+      content="Cartas cifradas y firmadas entregadas directamente entre nodos Onion."
+    />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <canvas id="sky" aria-hidden="true"></canvas>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">cartas selladas / ruta onion</p>
+          <h1>Troste <span class="onion-wordmark">Onion</span></h1>
+        </div>
+        <div class="topbar-tools">
+          <div class="top-status">
+            <div class="status-pill" id="runtime-status">Iniciando caja fuerte...</div>
+            <div class="status-pill" id="backend-status">Nodo Onion: detectando...</div>
+          </div>
+          <button
+            type="button"
+            class="menu-toggle"
+            id="menu-toggle"
+            aria-label="Abrir menu"
+            aria-expanded="false"
+            aria-controls="main-menu"
+          >
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+        </div>
+
+        <nav class="section-tabs" id="main-menu" aria-label="secciones de Troste">
+          <div class="menu-heading">
+            <span>Troste</span>
+            <strong>Secciones</strong>
+          </div>
+          <button type="button" class="active" data-section-target="identity">Identidad</button>
+          <button type="button" data-section-target="compose">Escribir</button>
+          <button type="button" data-section-target="search">Buscar</button>
+          <button type="button" data-section-target="nodes">Historial</button>
+          <button type="button" data-section-target="security">Seguridad</button>
+        </nav>
+      </header>
+
+      <section class="grid">
+        <article class="panel identity-panel active-section" data-section="identity">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">identidad</p>
+              <h2>Llaves locales</h2>
+            </div>
+            <span id="identity-count">0</span>
+          </div>
+
+          <form id="identity-form" class="identity-create-form">
+            <label class="field grow">
+              <span>Nombre de tu sobre</span>
+              <input id="identity-name" maxlength="60" placeholder="mi nombre de sobre" />
+            </label>
+            <label class="field grow" id="identity-passphrase-field">
+              <span>Frase para cerrar tu caja</span>
+              <input
+                id="identity-passphrase"
+                type="password"
+                minlength="12"
+                maxlength="128"
+                autocomplete="new-password"
+                placeholder="12 caracteres o mas"
+              />
+            </label>
+            <div class="actions full">
+              <button class="primary" type="submit">Crear identidad protegida</button>
+            </div>
+          </form>
+
+          <div id="identity-list" class="stack-list"></div>
+
+          <div class="onion-node-card" id="onion-node-card">
+            <div>
+              <p class="eyebrow">estacion onion</p>
+              <h3>Tu buzon privado</h3>
+              <p class="hint" id="onion-node-detail">Consultando el daemon local...</p>
+            </div>
+            <div class="onion-address-wrap">
+              <span>Direccion del nodo</span>
+              <code id="onion-address">pendiente</code>
+            </div>
+          </div>
+
+          <div class="share-card">
+            <div>
+              <p class="eyebrow">sello publico</p>
+              <h3>Tu direccion para recibir cartas</h3>
+              <p class="hint">Comparte este sello con alguien para que pueda escribirte. No contiene tus llaves privadas.</p>
+            </div>
+            <div class="actions">
+              <button type="button" id="copy-public" class="primary">Copiar sello</button>
+              <button type="button" id="download-backup">Guardar copia cifrada</button>
+            </div>
+          </div>
+
+          <details class="raw-details">
+            <summary>Ver texto tecnico del sello</summary>
+            <label class="field">
+              <span>Identidad publica activa</span>
+              <textarea id="public-identity" readonly rows="7"></textarea>
+            </label>
+          </details>
+
+        </article>
+
+        <article class="panel active-section" data-section="identity">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">contactos</p>
+              <h2>Contactos</h2>
+            </div>
+            <span id="contact-count">0</span>
+          </div>
+
+          <label class="field">
+            <span>Pegar identidad publica</span>
+            <textarea
+              id="contact-input"
+              rows="7"
+              maxlength="12288"
+              placeholder='{"type":"troste-public-identity", ...}'
+            ></textarea>
+          </label>
+          <div class="actions">
+            <button type="button" id="import-contact" class="primary">Importar contacto</button>
+            <button type="button" id="paste-contact">Pegar</button>
+          </div>
+          <div id="contact-list" class="stack-list"></div>
+        </article>
+
+        <article class="panel compose-panel" data-section="compose">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">escribir</p>
+              <h2>Sellar carta</h2>
+            </div>
+            <span id="letter-meter">0 palabras</span>
+          </div>
+
+          <form id="letter-form" class="letter-form">
+            <div id="letter-paper-stage" class="letter-paper-stage">
+              <div id="letter-paper" class="letter-paper">
+              <header class="letterhead">
+                <div class="letterhead-emblem" aria-hidden="true">T</div>
+                <div class="letterhead-title">
+                  <p>Troste</p>
+                  <h3>Correspondencia privada</h3>
+                </div>
+                <span class="letter-folio">Carta original</span>
+              </header>
+
+              <div class="letter-routing">
+                <div class="letter-address-block">
+                  <span>Remitente</span>
+                  <strong id="letter-sender-name">Sin identidad activa</strong>
+                  <small id="letter-sender-id">Sello local pendiente</small>
+                </div>
+                <label class="paper-field letter-recipient-field">
+                  <span>Destinatario</span>
+                  <select id="letter-recipient"></select>
+                </label>
+                <label class="paper-field letter-dateline-field">
+                  <span>Lugar y fecha</span>
+                  <input id="letter-dateline" maxlength="120" placeholder="Lima, 15 de julio de 2026" />
+                </label>
+              </div>
+
+              <div class="letter-divider" aria-hidden="true"><span></span></div>
+
+              <label class="paper-field letter-subject-field">
+                <span>Asunto</span>
+                <input id="letter-title" maxlength="160" placeholder="El motivo de esta carta" />
+              </label>
+
+              <label class="paper-field letter-salutation-field">
+                <span>Saludo</span>
+                <input id="letter-salutation" maxlength="120" placeholder="Estimada persona:" />
+              </label>
+
+              <label class="paper-field letter-body-field">
+                <span>Cuerpo de la carta</span>
+                <textarea id="letter-body" rows="13" placeholder="Escribe aquí aquello que merece llegar con calma."></textarea>
+              </label>
+
+              <div class="letter-closing-grid">
+                <label class="paper-field">
+                  <span>Despedida</span>
+                  <input id="letter-closing" maxlength="120" placeholder="Con afecto," />
+                </label>
+                <label class="paper-field letter-signature-field">
+                  <span>Firma</span>
+                  <input id="letter-signature" maxlength="80" placeholder="Tu nombre de sobre" />
+                </label>
+              </div>
+
+              <footer class="letter-paper-footer">
+                <label class="paper-field letter-mood-field">
+                  <span>Sello emocional</span>
+                  <select id="letter-mood">
+                    <option value="noche pesada">noche pesada</option>
+                    <option value="te extrano">te extrano</option>
+                    <option value="respiro lento">respiro lento</option>
+                    <option value="no le escribo">no le escribo</option>
+                    <option value="casi paz">casi paz</option>
+                    <option value="secreto">secreto</option>
+                  </select>
+                </label>
+                <div class="letter-private-mark" aria-hidden="true">
+                  <span>Privada</span>
+                  <small>Troste · 01</small>
+                </div>
+              </footer>
+              </div>
+
+              <div id="seal-animation" class="seal-animation" role="status" aria-live="polite" hidden>
+                <button
+                  type="button"
+                  id="seal-animation-skip"
+                  class="seal-animation-skip"
+                  aria-label="Omitir animacion"
+                  title="Omitir animacion"
+                >
+                  &times;
+                </button>
+                <div class="dispatch-scene">
+                  <div class="dispatch-heading">
+                    <p>Despacho de correspondencia</p>
+                    <strong id="seal-animation-recipient">Carta privada</strong>
+                  </div>
+
+                  <div class="dispatch-envelope" aria-hidden="true">
+                    <div class="envelope-back"></div>
+                    <div class="envelope-flap"></div>
+                    <div class="envelope-front"></div>
+                    <div class="wax-seal"><span>T</span></div>
+                  </div>
+
+                  <div class="dispatch-mailbox" aria-hidden="true">
+                    <div class="mailbox-cap"></div>
+                    <div class="mailbox-body">
+                      <span class="mailbox-slot"></span>
+                      <strong>Troste</strong>
+                    </div>
+                    <div class="mailbox-post"></div>
+                  </div>
+
+                  <p id="seal-animation-status" class="dispatch-status">Doblando la carta...</p>
+                </div>
+              </div>
+            </div>
+
+            <div id="letter-actions" class="actions full letter-actions">
+              <button class="primary" type="submit">Sellar carta</button>
+              <button type="reset">Limpiar</button>
+            </div>
+          </form>
+
+          <div class="sealed-output sealed-receipt" id="sealed-output" hidden>
+            <div class="sealed-receipt-mark" aria-hidden="true"><span>T</span></div>
+            <p class="eyebrow">carta despachada</p>
+            <h3>Tu carta ya tiene direccion</h3>
+            <label class="field">
+              <span>Codigo de carta</span>
+              <input id="sealed-code" readonly />
+            </label>
+            <div class="actions">
+              <button type="button" id="copy-code">Copiar codigo</button>
+              <button type="button" id="write-another" class="primary">Escribir otra carta</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel" data-section="nodes">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">cartas escritas</p>
+              <h2>Historial de envios</h2>
+            </div>
+            <span id="node-count">0</span>
+          </div>
+          <p class="hint" id="node-source">El historial vive cifrado en tu caja; el daemon local custodia solo sobres doblemente cifrados.</p>
+          <div id="node-list" class="stack-list nodes"></div>
+        </article>
+
+        <article class="panel reader-panel" data-section="search">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">consultar</p>
+              <h2>Abrir carta</h2>
+            </div>
+            <span id="read-badge">esperando</span>
+          </div>
+
+          <form id="open-form" class="inline-form">
+            <label class="field grow">
+              <span>Codigo privado</span>
+              <input id="open-code" placeholder="TROSTE-ONION1:direccion:id:secreto" />
+            </label>
+            <button class="primary" type="submit">Buscar carta</button>
+          </form>
+          <div id="open-status" class="open-status">Pega un codigo para buscar la carta.</div>
+          <div id="opened-letter" class="opened-letter formal-letter-view" hidden></div>
+        </article>
+
+        <article class="panel blueprint" data-section="nodes">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">como funciona</p>
+              <h2>Ruta sin directorio</h2>
+            </div>
+          </div>
+          <dl>
+            <dt>Direccion</dt>
+            <dd>El codigo contiene una direccion Onion v3 autocertificada. No existe una tabla central de nodos.</dd>
+            <dt>Apertura</dt>
+            <dd>El receptor llega por Tor, presenta el secreto del codigo y recibe un sobre que solo su llave puede abrir.</dd>
+            <dt>Disponibilidad</dt>
+            <dd>La direccion sobrevive a cambios de IP. El daemon y Tor deben seguir encendidos; el navegador puede cerrarse.</dd>
+          </dl>
+        </article>
+
+        <article class="panel reader-panel" data-section="security">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">verificacion</p>
+              <h2>Seguridad</h2>
+            </div>
+            <span>auditoria local</span>
+          </div>
+
+          <div id="vault-status" class="open-status warn">Llavero local sin PIN.</div>
+          <div class="inline-form vault-form">
+            <label class="field grow">
+              <span>PIN o frase local</span>
+              <input id="vault-pin" type="password" minlength="12" maxlength="128" autocomplete="current-password" placeholder="12 caracteres o mas" />
+            </label>
+            <button type="button" id="vault-enable" class="primary">Proteger</button>
+            <button type="button" id="vault-unlock">Desbloquear</button>
+            <button type="button" id="vault-lock">Bloquear</button>
+            <button type="button" id="backup-restore">Restaurar copia</button>
+            <input id="backup-file" type="file" accept="application/json,.json" hidden />
+          </div>
+
+          <div id="security-checklist" class="stack-list"></div>
+        </article>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
